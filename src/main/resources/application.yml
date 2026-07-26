@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: pitflow-orchestrator
+  main:
+    web-application-type: none
+aws:
+  region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    table-name: ${ORCHESTRATOR_TABLE_NAME:pitflow-orchestrator}
+  sqs:
+    orchestrator-queue: ${ORCHESTRATOR_QUEUE_NAME:service-order-orchestrator-queue}
+    payment-command-queue: ${PAYMENT_COMMAND_QUEUE_NAME:payment-command-queue}
+orchestrator:
+  consumer:
+    enabled: ${ORCHESTRATOR_CONSUMER_ENABLED:true}
+    delay-ms: ${ORCHESTRATOR_CONSUMER_DELAY_MS:1000}
+    wait-time-seconds: ${ORCHESTRATOR_CONSUMER_WAIT_SECONDS:20}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
