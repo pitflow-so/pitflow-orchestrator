@@ -1,0 +1,17 @@
+aws:
+  region: us-east-1
+  dynamodb:
+    table-name: pitflow-orchestrator-test
+  sqs:
+    orchestrator-queue: orchestrator-test
+    payment-command-queue: payment-test
+
+orchestrator:
+  consumer:
+    enabled: false
+    wait-time-seconds: 1
+  outbox:
+    enabled: false
+    batch-size: 10
+    lease-seconds: 60
+    max-backoff-seconds: 300

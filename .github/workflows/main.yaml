@@ -1,0 +1,87 @@
+name: Pitflow Orchestrator CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: pitflow-orchestrator-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  SECRET_ID: pitflow/bootstrap
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      container_image: ${{ steps.image.outputs.container_image }}
+      image_version: ${{ steps.image.outputs.image_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Build and test
+        run: mvn -B clean verify
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: platform
+        name: Read shared ECR URL
+        run: |
+          set -euo pipefail
+          ECR_URL="$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text | jq -r '.ECR_URL // empty')"
+          test -n "$ECR_URL"
+          echo "ecr_url=$ECR_URL" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/amazon-ecr-login@v2
+      - id: image
+        name: Build and push image
+        env:
+          ECR_URL: ${{ steps.platform.outputs.ecr_url }}
+        run: |
+          set -euo pipefail
+          IMAGE_VERSION="orchestrator-${GITHUB_SHA}"
+          CONTAINER_IMAGE="${ECR_URL}:${IMAGE_VERSION}"
+          docker build --tag "$CONTAINER_IMAGE" .
+          docker push "$CONTAINER_IMAGE"
+          echo "container_image=$CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "image_version=$IMAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure kubectl
+        run: |
+          set -euo pipefail
+          APP_JSON="$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text)"
+          EKS_CLUSTER_NAME="$(jq -r '.EKS_CLUSTER_NAME // empty' <<< "$APP_JSON")"
+          test -n "$EKS_CLUSTER_NAME"
+          aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+      - name: Deploy
+        env:
+          CONTAINER_IMAGE: ${{ needs.build.outputs.container_image }}
+          IMAGE_VERSION: ${{ needs.build.outputs.image_version }}
+        run: |
+          set -euo pipefail
+          kubectl apply -f infra/k8s/service.yaml
+          envsubst < infra/k8s/deployment.yaml | kubectl apply -f -
+          kubectl rollout status deployment/pitflow-orchestrator --namespace pitflow --timeout=600s
