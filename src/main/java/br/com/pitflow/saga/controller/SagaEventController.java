@@ -3,11 +3,15 @@ package br.com.pitflow.saga.controller;
 import br.com.pitflow.saga.core.entity.Money;
 import br.com.pitflow.saga.core.event.BudgetApprovedEvent;
 import br.com.pitflow.saga.core.event.PaymentLinkCreatedEvent;
+import br.com.pitflow.saga.core.event.PaymentApprovedEvent;
 import br.com.pitflow.saga.core.event.ServiceOrderAwaitingPaymentEvent;
+import br.com.pitflow.saga.core.event.ServiceOrderReadyForExecutionEvent;
 import br.com.pitflow.saga.core.gateway.SagaPaymentLinkGateway.HandleResult;
 import br.com.pitflow.saga.core.gateway.SagaStartGateway.StartResult;
 import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreated;
+import br.com.pitflow.saga.core.usecase.HandlePaymentApproved;
 import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPayment;
+import br.com.pitflow.saga.core.usecase.CompletePaymentSaga;
 import br.com.pitflow.saga.core.usecase.StartPaymentSaga;
 
 import java.math.BigDecimal;
@@ -17,17 +21,23 @@ import java.util.UUID;
 public class SagaEventController {
     private final StartPaymentSaga startPaymentSaga;
     private final HandlePaymentLinkCreated handlePaymentLinkCreated;
+    private final HandlePaymentApproved handlePaymentApproved;
+    private final CompletePaymentSaga completePaymentSaga;
     private final ConfirmServiceOrderAwaitingPayment
             confirmServiceOrderAwaitingPayment;
 
     public SagaEventController(
             StartPaymentSaga startPaymentSaga,
             HandlePaymentLinkCreated handlePaymentLinkCreated,
+            HandlePaymentApproved handlePaymentApproved,
+            CompletePaymentSaga completePaymentSaga,
             ConfirmServiceOrderAwaitingPayment
                     confirmServiceOrderAwaitingPayment
     ) {
         this.startPaymentSaga = startPaymentSaga;
         this.handlePaymentLinkCreated = handlePaymentLinkCreated;
+        this.handlePaymentApproved = handlePaymentApproved;
+        this.completePaymentSaga = completePaymentSaga;
         this.confirmServiceOrderAwaitingPayment =
                 confirmServiceOrderAwaitingPayment;
     }
@@ -60,6 +70,40 @@ public class SagaEventController {
                 command.expiresAt(),
                 command.occurredAt()
         ));
+    }
+
+    public br.com.pitflow.saga.core.gateway.SagaPaymentApprovalGateway.HandleResult
+    paymentApproved(PaymentApprovedCommand command) {
+        return handlePaymentApproved.execute(new PaymentApprovedEvent(
+                command.messageId(),
+                command.correlationId(),
+                command.sagaId(),
+                command.serviceOrderId(),
+                command.paymentId(),
+                new Money(
+                        new BigDecimal(command.approvedAmount()),
+                        command.currency()
+                ),
+                command.externalPaymentId(),
+                command.occurredAt()
+        ));
+    }
+
+    public br.com.pitflow.saga.core.gateway.SagaPaymentApprovalGateway.HandleResult
+    serviceOrderReadyForExecution(
+            ServiceOrderReadyForExecutionCommand command
+    ) {
+        return completePaymentSaga.execute(
+                new ServiceOrderReadyForExecutionEvent(
+                        command.messageId(),
+                        command.correlationId(),
+                        command.causationId(),
+                        command.sagaId(),
+                        command.serviceOrderId(),
+                        command.paymentId(),
+                        command.occurredAt()
+                )
+        );
     }
 
     public StartResult budgetApproved(BudgetApprovedCommand command) {
@@ -99,6 +143,30 @@ public class SagaEventController {
     }
 
     public record ServiceOrderAwaitingPaymentCommand(
+            UUID messageId,
+            UUID correlationId,
+            UUID causationId,
+            UUID sagaId,
+            UUID serviceOrderId,
+            UUID paymentId,
+            Instant occurredAt
+    ) {
+    }
+
+    public record PaymentApprovedCommand(
+            UUID messageId,
+            UUID correlationId,
+            UUID sagaId,
+            UUID serviceOrderId,
+            UUID paymentId,
+            String approvedAmount,
+            String currency,
+            String externalPaymentId,
+            Instant occurredAt
+    ) {
+    }
+
+    public record ServiceOrderReadyForExecutionCommand(
             UUID messageId,
             UUID correlationId,
             UUID causationId,
