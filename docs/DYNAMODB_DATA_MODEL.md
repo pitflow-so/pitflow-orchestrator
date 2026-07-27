@@ -20,21 +20,6 @@ do DynamoDB: string, número e booleano. Eles não fazem parte do nome do campo.
 | `HISTORY` | Histórico imutável de transições | `PK=SAGA#{sagaId}`, `SK=EVENT#{occurredAt}#{messageId}` | `eventType`, `messageId`, `state`, `occurredAt`, dados específicos da transição |
 | `ACTIVE_SAGA` | Trava de unicidade por ordem de serviço | `PK=ORDER#{serviceOrderId}`, `SK=ACTIVE_SAGA` | `sagaId`, `createdAt` |
 
-### Por que `SAGA` não possui `messageType`
-
-O item `SAGA/METADATA` representa o agregado atual, não uma mensagem. Durante
-o fluxo ele é atualizado por várias mensagens, por exemplo:
-
-1. `ServiceOrderBudgetApproved`;
-2. `PaymentLinkCreated`;
-3. `ServiceOrderAwaitingPayment`;
-4. futuramente, `PaymentApproved`;
-5. futuramente, `ServiceOrderReadyForExecution`.
-
-Não existe um único `messageType` correto para esse item. O estado atual fica
-em `state`; a mensagem recebida fica em `INBOX`; e a transição fica em
-`HISTORY`.
-
 ## Atributos do item `SAGA`
 
 | Atributo | Obrigatório | Descrição |
@@ -67,17 +52,3 @@ em `state`; a mensagem recebida fica em `INBOX`; e a transição fica em
 
 Os GSIs são esparsos: um item só aparece no índice quando possui as duas chaves
 daquele índice.
-
-## Exemplo homologado
-
-Para a OS `11136e83-72c7-4681-8c41-3e7044fcacc9`, a homologação de
-27/07/2026 resultou em:
-
-- um item `SAGA/METADATA` no estado `AWAITING_PAYMENT`;
-- três itens `INBOX`, um para cada mensagem processada;
-- itens `HISTORY` sob a partição da SAGA;
-- itens `OUTBOX` publicados, preservados para auditoria com estado final.
-
-Consultar somente itens que tenham `serviceOrderId` não retorna necessariamente
-todo o histórico. Para uma visão completa, primeiro localize a SAGA pelo índice
-`by-service-order` e depois consulte a partição `PK=SAGA#{sagaId}`.
