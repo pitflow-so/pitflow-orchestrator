@@ -6,6 +6,8 @@ import br.com.pitflow.saga.core.event.PaymentLinkCreatedEvent;
 import br.com.pitflow.saga.core.event.PaymentApprovedEvent;
 import br.com.pitflow.saga.core.event.ServiceOrderAwaitingPaymentEvent;
 import br.com.pitflow.saga.core.event.ServiceOrderReadyForExecutionEvent;
+import br.com.pitflow.saga.core.event.PaymentRejectedEvent;
+import br.com.pitflow.saga.core.event.ServiceOrderCancelledEvent;
 import br.com.pitflow.saga.core.gateway.SagaPaymentLinkGateway.HandleResult;
 import br.com.pitflow.saga.core.gateway.SagaStartGateway.StartResult;
 import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreated;
@@ -13,6 +15,8 @@ import br.com.pitflow.saga.core.usecase.HandlePaymentApproved;
 import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPayment;
 import br.com.pitflow.saga.core.usecase.CompletePaymentSaga;
 import br.com.pitflow.saga.core.usecase.StartPaymentSaga;
+import br.com.pitflow.saga.core.usecase.HandlePaymentRejected;
+import br.com.pitflow.saga.core.usecase.CompleteCompensation;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -25,6 +29,8 @@ public class SagaEventController {
     private final CompletePaymentSaga completePaymentSaga;
     private final ConfirmServiceOrderAwaitingPayment
             confirmServiceOrderAwaitingPayment;
+    private final HandlePaymentRejected handlePaymentRejected;
+    private final CompleteCompensation completeCompensation;
 
     public SagaEventController(
             StartPaymentSaga startPaymentSaga,
@@ -32,7 +38,9 @@ public class SagaEventController {
             HandlePaymentApproved handlePaymentApproved,
             CompletePaymentSaga completePaymentSaga,
             ConfirmServiceOrderAwaitingPayment
-                    confirmServiceOrderAwaitingPayment
+                    confirmServiceOrderAwaitingPayment,
+            HandlePaymentRejected handlePaymentRejected,
+            CompleteCompensation completeCompensation
     ) {
         this.startPaymentSaga = startPaymentSaga;
         this.handlePaymentLinkCreated = handlePaymentLinkCreated;
@@ -40,6 +48,22 @@ public class SagaEventController {
         this.completePaymentSaga = completePaymentSaga;
         this.confirmServiceOrderAwaitingPayment =
                 confirmServiceOrderAwaitingPayment;
+        this.handlePaymentRejected = handlePaymentRejected;
+        this.completeCompensation = completeCompensation;
+    }
+
+    public br.com.pitflow.saga.core.gateway.SagaCompensationGateway.HandleResult paymentRejected(
+            PaymentRejectedCommand command) {
+        return handlePaymentRejected.execute(new PaymentRejectedEvent(command.messageId(), command.correlationId(),
+                command.sagaId(), command.serviceOrderId(), command.paymentId(), command.reasonCode(),
+                command.reason(), command.occurredAt()));
+    }
+
+    public br.com.pitflow.saga.core.gateway.SagaCompensationGateway.HandleResult serviceOrderCancelled(
+            ServiceOrderCancelledCommand command) {
+        return completeCompensation.execute(new ServiceOrderCancelledEvent(command.messageId(),
+                command.correlationId(), command.causationId(), command.sagaId(), command.serviceOrderId(),
+                command.paymentId(), command.reason(), command.occurredAt()));
     }
 
     public HandleResult serviceOrderAwaitingPayment(
@@ -176,4 +200,12 @@ public class SagaEventController {
             Instant occurredAt
     ) {
     }
+
+    public record PaymentRejectedCommand(UUID messageId, UUID correlationId, UUID sagaId,
+                                         UUID serviceOrderId, UUID paymentId, String reasonCode,
+                                         String reason, Instant occurredAt) {}
+
+    public record ServiceOrderCancelledCommand(UUID messageId, UUID correlationId, UUID causationId,
+                                               UUID sagaId, UUID serviceOrderId, UUID paymentId,
+                                               String reason, Instant occurredAt) {}
 }
