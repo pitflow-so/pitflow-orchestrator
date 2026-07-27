@@ -80,6 +80,9 @@ public class OrchestratorEventConsumer {
         return switch (root.path("type").asText()) {
             case "ServiceOrderBudgetApproved" -> budgetApproved(root);
             case "PaymentLinkCreated" -> paymentLinkCreated(root);
+            case "PaymentApproved" -> paymentApproved(root);
+            case "ServiceOrderReadyForExecution" ->
+                    serviceOrderReadyForExecution(root);
             case "ServiceOrderAwaitingPayment" ->
                     serviceOrderAwaitingPayment(root);
             default -> throw new java.lang.UnsupportedOperationException(
@@ -130,6 +133,39 @@ public class OrchestratorEventConsumer {
                         requiredText(payload, "preferenceId"),
                         requiredText(payload, "checkoutUrl"),
                         instant(payload, "expiresAt"),
+                        instant(root, "occurredAt")
+                )
+        );
+    }
+
+    private Object paymentApproved(JsonNode root) {
+        var payload = root.path("payload");
+        var amount = payload.path("approvedAmount");
+        return controller.paymentApproved(
+                new SagaEventController.PaymentApprovedCommand(
+                        uuid(root, "messageId"),
+                        uuid(root, "correlationId"),
+                        uuid(root, "sagaId"),
+                        uuid(root, "serviceOrderId"),
+                        uuid(payload, "paymentId"),
+                        requiredText(amount, "amount"),
+                        requiredText(amount, "currency"),
+                        requiredText(payload, "externalPaymentId"),
+                        instant(root, "occurredAt")
+                )
+        );
+    }
+
+    private Object serviceOrderReadyForExecution(JsonNode root) {
+        var payload = root.path("payload");
+        return controller.serviceOrderReadyForExecution(
+                new SagaEventController.ServiceOrderReadyForExecutionCommand(
+                        uuid(root, "messageId"),
+                        uuid(root, "correlationId"),
+                        uuid(root, "causationId"),
+                        uuid(root, "sagaId"),
+                        uuid(root, "serviceOrderId"),
+                        uuid(payload, "paymentId"),
                         instant(root, "occurredAt")
                 )
         );

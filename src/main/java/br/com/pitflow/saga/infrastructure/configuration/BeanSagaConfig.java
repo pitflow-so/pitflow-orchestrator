@@ -3,10 +3,15 @@ package br.com.pitflow.saga.infrastructure.configuration;
 import br.com.pitflow.saga.controller.SagaEventController;
 import br.com.pitflow.saga.core.gateway.SagaStartGateway;
 import br.com.pitflow.saga.core.gateway.SagaPaymentLinkGateway;
+import br.com.pitflow.saga.core.gateway.SagaPaymentApprovalGateway;
 import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreated;
 import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreatedImp;
+import br.com.pitflow.saga.core.usecase.HandlePaymentApproved;
+import br.com.pitflow.saga.core.usecase.HandlePaymentApprovedImp;
 import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPayment;
 import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPaymentImp;
+import br.com.pitflow.saga.core.usecase.CompletePaymentSaga;
+import br.com.pitflow.saga.core.usecase.CompletePaymentSagaImp;
 import br.com.pitflow.saga.core.usecase.StartPaymentSaga;
 import br.com.pitflow.saga.core.usecase.StartPaymentSagaImp;
 import br.com.pitflow.saga.infrastructure.consumer.sqs.OrchestratorEventConsumer;
@@ -14,6 +19,7 @@ import br.com.pitflow.saga.infrastructure.outbox.DynamoDbOutboxRepository;
 import br.com.pitflow.saga.infrastructure.outbox.OutboxPublisherScheduler;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaStartAdapter;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaPaymentLinkAdapter;
+import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaPaymentApprovalAdapter;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -72,6 +78,35 @@ public class BeanSagaConfig {
     }
 
     @Bean
+    SagaPaymentApprovalGateway sagaPaymentApprovalGateway(
+            DynamoDbClient client,
+            ObjectMapper objectMapper,
+            @Value("${aws.dynamodb.table-name}") String tableName,
+            @Value("${aws.sqs.operation-command-queue}") String destination
+    ) {
+        return new DynamoDbSagaPaymentApprovalAdapter(
+                client, objectMapper, tableName, destination
+        );
+    }
+
+    @Bean
+    HandlePaymentApproved handlePaymentApproved(
+            SagaPaymentApprovalGateway gateway,
+            Clock clock
+    ) {
+        return new HandlePaymentApprovedImp(
+                gateway, clock, UUID::randomUUID
+        );
+    }
+
+    @Bean
+    CompletePaymentSaga completePaymentSaga(
+            SagaPaymentApprovalGateway gateway
+    ) {
+        return new CompletePaymentSagaImp(gateway);
+    }
+
+    @Bean
     HandlePaymentLinkCreated handlePaymentLinkCreated(
             SagaPaymentLinkGateway gateway,
             Clock clock
@@ -100,12 +135,16 @@ public class BeanSagaConfig {
     SagaEventController sagaEventController(
             StartPaymentSaga startPaymentSaga,
             HandlePaymentLinkCreated handlePaymentLinkCreated,
+            HandlePaymentApproved handlePaymentApproved,
+            CompletePaymentSaga completePaymentSaga,
             ConfirmServiceOrderAwaitingPayment
                     confirmServiceOrderAwaitingPayment
     ) {
         return new SagaEventController(
                 startPaymentSaga,
                 handlePaymentLinkCreated,
+                handlePaymentApproved,
+                completePaymentSaga,
                 confirmServiceOrderAwaitingPayment
         );
     }
