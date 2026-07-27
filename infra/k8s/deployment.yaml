@@ -50,6 +50,8 @@ spec:
               value: "service-order-orchestrator-queue"
             - name: PAYMENT_COMMAND_QUEUE_NAME
               value: "payment-command-queue"
+            - name: OPERATION_COMMAND_QUEUE_NAME
+              value: "operation-command-queue"
           startupProbe:
             httpGet:
               path: /orchestrator/actuator/health

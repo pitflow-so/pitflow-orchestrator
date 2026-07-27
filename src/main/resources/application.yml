@@ -11,6 +11,7 @@ aws:
   sqs:
     orchestrator-queue: ${ORCHESTRATOR_QUEUE_NAME:service-order-orchestrator-queue}
     payment-command-queue: ${PAYMENT_COMMAND_QUEUE_NAME:payment-command-queue}
+    operation-command-queue: ${OPERATION_COMMAND_QUEUE_NAME:operation-command-queue}
 orchestrator:
   consumer:
     enabled: ${ORCHESTRATOR_CONSUMER_ENABLED:true}

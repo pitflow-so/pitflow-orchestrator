@@ -12,9 +12,9 @@ import software.amazon.awssdk.services.sqs.model.*;
 import java.time.Instant;
 import java.util.UUID;
 
-public class ServiceOrderEventConsumer {
+public class OrchestratorEventConsumer {
     private static final Logger LOGGER =
-            LoggerFactory.getLogger(ServiceOrderEventConsumer.class);
+            LoggerFactory.getLogger(OrchestratorEventConsumer.class);
 
     private final SqsClient sqs;
     private final ObjectMapper objectMapper;
@@ -22,7 +22,7 @@ public class ServiceOrderEventConsumer {
     private final String queueUrl;
     private final int waitTimeSeconds;
 
-    public ServiceOrderEventConsumer(
+    public OrchestratorEventConsumer(
             SqsClient sqs,
             ObjectMapper objectMapper,
             SagaEventController controller,
@@ -54,36 +54,14 @@ public class ServiceOrderEventConsumer {
         try {
             var root = objectMapper.readTree(message.body());
             validateEnvelope(root);
-            if (!"ServiceOrderBudgetApproved".equals(
-                    root.path("type").asText()
-            )) {
-                throw new java.lang.UnsupportedOperationException(
-                        "Unsupported message type"
-                );
-            }
-            var amount = root.path("payload").path("amount");
-            var result = controller.budgetApproved(
-                    new SagaEventController.BudgetApprovedCommand(
-                            UUID.fromString(root.path("messageId").asText()),
-                            UUID.fromString(
-                                    root.path("correlationId").asText()
-                            ),
-                            UUID.fromString(
-                                    root.path("serviceOrderId").asText()
-                            ),
-                            requiredText(amount, "amount"),
-                            requiredText(amount, "currency"),
-                            Instant.parse(
-                                    root.path("occurredAt").asText()
-                            )
-                    )
-            );
+            var result = dispatch(root);
             sqs.deleteMessage(DeleteMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .receiptHandle(message.receiptHandle())
                     .build());
             LOGGER.info(
-                    "SAGA start handled messageId={} result={}",
+                    "SAGA event handled type={} messageId={} result={}",
+                    root.path("type").asText(),
                     root.path("messageId").asText(),
                     result
             );
@@ -94,6 +72,65 @@ public class ServiceOrderEventConsumer {
                     exception
             );
         }
+    }
+
+    private Object dispatch(JsonNode root) {
+        return switch (root.path("type").asText()) {
+            case "ServiceOrderBudgetApproved" -> budgetApproved(root);
+            case "PaymentLinkCreated" -> paymentLinkCreated(root);
+            case "ServiceOrderAwaitingPayment" ->
+                    serviceOrderAwaitingPayment(root);
+            default -> throw new java.lang.UnsupportedOperationException(
+                    "Unsupported message type: "
+                            + root.path("type").asText()
+            );
+        };
+    }
+
+    private Object serviceOrderAwaitingPayment(JsonNode root) {
+        var payload = root.path("payload");
+        return controller.serviceOrderAwaitingPayment(
+                new SagaEventController.ServiceOrderAwaitingPaymentCommand(
+                        uuid(root, "messageId"),
+                        uuid(root, "correlationId"),
+                        uuid(root, "causationId"),
+                        uuid(root, "sagaId"),
+                        uuid(root, "serviceOrderId"),
+                        uuid(payload, "paymentId"),
+                        instant(root, "occurredAt")
+                )
+        );
+    }
+
+    private Object budgetApproved(JsonNode root) {
+        var amount = root.path("payload").path("amount");
+        return controller.budgetApproved(
+                new SagaEventController.BudgetApprovedCommand(
+                        uuid(root, "messageId"),
+                        uuid(root, "correlationId"),
+                        uuid(root, "serviceOrderId"),
+                        requiredText(amount, "amount"),
+                        requiredText(amount, "currency"),
+                        instant(root, "occurredAt")
+                )
+        );
+    }
+
+    private Object paymentLinkCreated(JsonNode root) {
+        var payload = root.path("payload");
+        return controller.paymentLinkCreated(
+                new SagaEventController.PaymentLinkCreatedCommand(
+                        uuid(root, "messageId"),
+                        uuid(root, "correlationId"),
+                        uuid(root, "sagaId"),
+                        uuid(root, "serviceOrderId"),
+                        uuid(payload, "paymentId"),
+                        requiredText(payload, "preferenceId"),
+                        requiredText(payload, "checkoutUrl"),
+                        instant(payload, "expiresAt"),
+                        instant(root, "occurredAt")
+                )
+        );
     }
 
     private void validateEnvelope(JsonNode root) {
@@ -117,5 +154,13 @@ public class ServiceOrderEventConsumer {
             );
         }
         return value;
+    }
+
+    private UUID uuid(JsonNode node, String field) {
+        return UUID.fromString(requiredText(node, field));
+    }
+
+    private Instant instant(JsonNode node, String field) {
+        return Instant.parse(requiredText(node, field));
     }
 }
