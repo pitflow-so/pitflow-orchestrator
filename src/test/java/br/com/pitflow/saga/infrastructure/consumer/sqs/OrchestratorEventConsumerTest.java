@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.time.Instant;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -133,6 +135,40 @@ class OrchestratorEventConsumerTest {
         verify(sqs).deleteMessage(argThat(
                 (DeleteMessageRequest request) ->
                 "receipt-1".equals(request.receiptHandle())
+        ));
+    }
+
+    @Test
+    void acceptsLegacyEpochSecondsInScientificNotation() {
+        when(controller.budgetApproved(any()))
+                .thenReturn(SagaStartGateway.StartResult.CREATED);
+        var message = Message.builder()
+                .messageId("sqs-epoch")
+                .receiptHandle("receipt-epoch")
+                .body("""
+                        {
+                          "schemaVersion": 1,
+                          "messageId": "10000000-0000-0000-0000-000000000001",
+                          "type": "ServiceOrderBudgetApproved",
+                          "occurredAt": 1.7851238415388188E9,
+                          "correlationId": "20000000-0000-0000-0000-000000000002",
+                          "serviceOrderId": "30000000-0000-0000-0000-000000000003",
+                          "payload": {
+                            "amount": {"amount": "450.00", "currency": "BRL"}
+                          }
+                        }
+                        """)
+                .build();
+
+        consumer.process(message);
+
+        verify(controller).budgetApproved(argThat(command ->
+                Instant.parse("2026-07-27T03:44:01.538818800Z")
+                        .equals(command.occurredAt())
+        ));
+        verify(sqs).deleteMessage(argThat(
+                (DeleteMessageRequest request) ->
+                        "receipt-epoch".equals(request.receiptHandle())
         ));
     }
 

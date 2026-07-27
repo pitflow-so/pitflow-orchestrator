@@ -9,7 +9,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.UUID;
 
 public class OrchestratorEventConsumer {
@@ -161,6 +163,22 @@ public class OrchestratorEventConsumer {
     }
 
     private Instant instant(JsonNode node, String field) {
-        return Instant.parse(requiredText(node, field));
+        String value = requiredText(node, field);
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException exception) {
+            return epoch(new BigDecimal(value));
+        }
+    }
+
+    private Instant epoch(BigDecimal value) {
+        if (value.abs().compareTo(new BigDecimal("100000000000")) >= 0) {
+            return Instant.ofEpochMilli(value.longValueExact());
+        }
+        BigDecimal[] parts = value.divideAndRemainder(BigDecimal.ONE);
+        return Instant.ofEpochSecond(
+                parts[0].longValueExact(),
+                parts[1].movePointRight(9).longValue()
+        );
     }
 }
