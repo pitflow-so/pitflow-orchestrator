@@ -20,6 +20,12 @@ import br.com.pitflow.saga.infrastructure.outbox.OutboxPublisherScheduler;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaStartAdapter;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaPaymentLinkAdapter;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaPaymentApprovalAdapter;
+import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaCompensationAdapter;
+import br.com.pitflow.saga.core.gateway.SagaCompensationGateway;
+import br.com.pitflow.saga.core.usecase.HandlePaymentRejected;
+import br.com.pitflow.saga.core.usecase.HandlePaymentRejectedImp;
+import br.com.pitflow.saga.core.usecase.CompleteCompensation;
+import br.com.pitflow.saga.core.usecase.CompleteCompensationImp;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -90,6 +96,23 @@ public class BeanSagaConfig {
     }
 
     @Bean
+    SagaCompensationGateway sagaCompensationGateway(DynamoDbClient client, ObjectMapper objectMapper,
+            @Value("${aws.dynamodb.table-name}") String tableName,
+            @Value("${aws.sqs.operation-command-queue}") String destination) {
+        return new DynamoDbSagaCompensationAdapter(client, objectMapper, tableName, destination);
+    }
+
+    @Bean
+    HandlePaymentRejected handlePaymentRejected(SagaCompensationGateway gateway, Clock clock) {
+        return new HandlePaymentRejectedImp(gateway, clock, UUID::randomUUID);
+    }
+
+    @Bean
+    CompleteCompensation completeCompensation(SagaCompensationGateway gateway) {
+        return new CompleteCompensationImp(gateway);
+    }
+
+    @Bean
     HandlePaymentApproved handlePaymentApproved(
             SagaPaymentApprovalGateway gateway,
             Clock clock
@@ -138,14 +161,18 @@ public class BeanSagaConfig {
             HandlePaymentApproved handlePaymentApproved,
             CompletePaymentSaga completePaymentSaga,
             ConfirmServiceOrderAwaitingPayment
-                    confirmServiceOrderAwaitingPayment
+                    confirmServiceOrderAwaitingPayment,
+            HandlePaymentRejected handlePaymentRejected,
+            CompleteCompensation completeCompensation
     ) {
         return new SagaEventController(
                 startPaymentSaga,
                 handlePaymentLinkCreated,
                 handlePaymentApproved,
                 completePaymentSaga,
-                confirmServiceOrderAwaitingPayment
+                confirmServiceOrderAwaitingPayment,
+                handlePaymentRejected,
+                completeCompensation
         );
     }
 

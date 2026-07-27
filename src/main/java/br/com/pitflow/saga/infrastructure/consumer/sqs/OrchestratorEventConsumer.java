@@ -81,6 +81,8 @@ public class OrchestratorEventConsumer {
             case "ServiceOrderBudgetApproved" -> budgetApproved(root);
             case "PaymentLinkCreated" -> paymentLinkCreated(root);
             case "PaymentApproved" -> paymentApproved(root);
+            case "PaymentRejected" -> paymentRejected(root);
+            case "ServiceOrderCancelled" -> serviceOrderCancelled(root);
             case "ServiceOrderReadyForExecution" ->
                     serviceOrderReadyForExecution(root);
             case "ServiceOrderAwaitingPayment" ->
@@ -90,6 +92,22 @@ public class OrchestratorEventConsumer {
                             + root.path("type").asText()
             );
         };
+    }
+
+    private Object paymentRejected(JsonNode root) {
+        var payload = root.path("payload");
+        return controller.paymentRejected(new SagaEventController.PaymentRejectedCommand(
+                uuid(root,"messageId"), uuid(root,"correlationId"), uuid(root,"sagaId"),
+                uuid(root,"serviceOrderId"), uuid(payload,"paymentId"), requiredText(payload,"reasonCode"),
+                requiredText(payload,"reason"), instant(root,"occurredAt")));
+    }
+
+    private Object serviceOrderCancelled(JsonNode root) {
+        var payload = root.path("payload");
+        return controller.serviceOrderCancelled(new SagaEventController.ServiceOrderCancelledCommand(
+                uuid(root,"messageId"), uuid(root,"correlationId"), uuid(root,"causationId"),
+                uuid(root,"sagaId"), uuid(root,"serviceOrderId"), uuid(payload,"paymentId"),
+                requiredText(payload,"reason"), instant(root,"occurredAt")));
     }
 
     private Object serviceOrderAwaitingPayment(JsonNode root) {
