@@ -1,8 +1,9 @@
 spring:
   application:
     name: pitflow-orchestrator
-  main:
-    web-application-type: none
+server:
+  servlet:
+    context-path: /orchestrator
 aws:
   region: ${AWS_REGION:us-east-1}
   dynamodb:
@@ -15,6 +16,12 @@ orchestrator:
     enabled: ${ORCHESTRATOR_CONSUMER_ENABLED:true}
     delay-ms: ${ORCHESTRATOR_CONSUMER_DELAY_MS:1000}
     wait-time-seconds: ${ORCHESTRATOR_CONSUMER_WAIT_SECONDS:20}
+  outbox:
+    enabled: ${ORCHESTRATOR_OUTBOX_ENABLED:true}
+    delay-ms: ${ORCHESTRATOR_OUTBOX_DELAY_MS:5000}
+    batch-size: ${ORCHESTRATOR_OUTBOX_BATCH_SIZE:10}
+    lease-seconds: ${ORCHESTRATOR_OUTBOX_LEASE_SECONDS:60}
+    max-backoff-seconds: ${ORCHESTRATOR_OUTBOX_MAX_BACKOFF_SECONDS:300}
 management:
   endpoints:
     web:
