@@ -2,12 +2,18 @@ package br.com.pitflow.saga.infrastructure.configuration;
 
 import br.com.pitflow.saga.controller.SagaEventController;
 import br.com.pitflow.saga.core.gateway.SagaStartGateway;
+import br.com.pitflow.saga.core.gateway.SagaPaymentLinkGateway;
+import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreated;
+import br.com.pitflow.saga.core.usecase.HandlePaymentLinkCreatedImp;
+import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPayment;
+import br.com.pitflow.saga.core.usecase.ConfirmServiceOrderAwaitingPaymentImp;
 import br.com.pitflow.saga.core.usecase.StartPaymentSaga;
 import br.com.pitflow.saga.core.usecase.StartPaymentSagaImp;
-import br.com.pitflow.saga.infrastructure.consumer.sqs.ServiceOrderEventConsumer;
+import br.com.pitflow.saga.infrastructure.consumer.sqs.OrchestratorEventConsumer;
 import br.com.pitflow.saga.infrastructure.outbox.DynamoDbOutboxRepository;
 import br.com.pitflow.saga.infrastructure.outbox.OutboxPublisherScheduler;
 import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaStartAdapter;
+import br.com.pitflow.saga.infrastructure.persistence.dynamodb.DynamoDbSagaPaymentLinkAdapter;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -54,6 +60,35 @@ public class BeanSagaConfig {
     }
 
     @Bean
+    SagaPaymentLinkGateway sagaPaymentLinkGateway(
+            DynamoDbClient client,
+            ObjectMapper objectMapper,
+            @Value("${aws.dynamodb.table-name}") String tableName,
+            @Value("${aws.sqs.operation-command-queue}") String destination
+    ) {
+        return new DynamoDbSagaPaymentLinkAdapter(
+                client, objectMapper, tableName, destination
+        );
+    }
+
+    @Bean
+    HandlePaymentLinkCreated handlePaymentLinkCreated(
+            SagaPaymentLinkGateway gateway,
+            Clock clock
+    ) {
+        return new HandlePaymentLinkCreatedImp(
+                gateway, clock, UUID::randomUUID
+        );
+    }
+
+    @Bean
+    ConfirmServiceOrderAwaitingPayment confirmServiceOrderAwaitingPayment(
+            SagaPaymentLinkGateway gateway
+    ) {
+        return new ConfirmServiceOrderAwaitingPaymentImp(gateway);
+    }
+
+    @Bean
     StartPaymentSaga startPaymentSaga(
             SagaStartGateway gateway,
             Clock clock
@@ -62,8 +97,17 @@ public class BeanSagaConfig {
     }
 
     @Bean
-    SagaEventController sagaEventController(StartPaymentSaga useCase) {
-        return new SagaEventController(useCase);
+    SagaEventController sagaEventController(
+            StartPaymentSaga startPaymentSaga,
+            HandlePaymentLinkCreated handlePaymentLinkCreated,
+            ConfirmServiceOrderAwaitingPayment
+                    confirmServiceOrderAwaitingPayment
+    ) {
+        return new SagaEventController(
+                startPaymentSaga,
+                handlePaymentLinkCreated,
+                confirmServiceOrderAwaitingPayment
+        );
     }
 
     @Bean
@@ -71,14 +115,14 @@ public class BeanSagaConfig {
             name = "orchestrator.consumer.enabled",
             havingValue = "true"
     )
-    ServiceOrderEventConsumer serviceOrderEventConsumer(
+    OrchestratorEventConsumer orchestratorEventConsumer(
             SqsClient sqs,
             ObjectMapper objectMapper,
             SagaEventController controller,
             @Value("${aws.sqs.orchestrator-queue}") String queueName,
             @Value("${orchestrator.consumer.wait-time-seconds}") int wait
     ) {
-        return new ServiceOrderEventConsumer(
+        return new OrchestratorEventConsumer(
                 sqs, objectMapper, controller, queueName, wait
         );
     }

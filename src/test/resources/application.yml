@@ -5,6 +5,7 @@ aws:
   sqs:
     orchestrator-queue: orchestrator-test
     payment-command-queue: payment-test
+    operation-command-queue: operation-test
 
 orchestrator:
   consumer:
