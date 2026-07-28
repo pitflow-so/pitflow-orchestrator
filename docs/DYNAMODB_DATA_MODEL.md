@@ -20,6 +20,67 @@ do DynamoDB: string, número e booleano. Eles não fazem parte do nome do campo.
 | `HISTORY` | Histórico imutável de transições | `PK=SAGA#{sagaId}`, `SK=EVENT#{occurredAt}#{messageId}` | `eventType`, `messageId`, `state`, `occurredAt`, dados específicos da transição |
 | `ACTIVE_SAGA` | Trava de unicidade por ordem de serviço | `PK=ORDER#{serviceOrderId}`, `SK=ACTIVE_SAGA` | `sagaId`, `createdAt` |
 
+## Como funciona a Outbox
+
+A Outbox **não é outra tabela**. Cada mensagem a publicar é apenas mais um item
+na tabela `pitflow-orchestrator`, identificado por:
+
+```text
+PK = SAGA#{sagaId}
+SK = OUTBOX#{messageId}
+```
+
+Assim, `SAGA#123 / METADATA` representa o estado atual da SAGA 123, enquanto
+`SAGA#123 / OUTBOX#456` representa uma mensagem dessa mesma SAGA que deve ser
+enviada ao SQS. Os dois itens compartilham a `PK`, mas têm finalidades e
+atributos diferentes.
+
+Exemplo simplificado:
+
+| PK | SK | entityType | messageType | destination | status |
+|---|---|---|---|---|---|
+| `SAGA#123` | `METADATA` | `SAGA` | — | — | — |
+| `SAGA#123` | `OUTBOX#456` | `OUTBOX` | `CreatePayment` | `payment-queue` | `PENDING` |
+| `SAGA#123` | `EVENT#2026-07-28T00:00:00Z#789` | `HISTORY` | — | — | — |
+
+O fluxo de publicação é:
+
+1. A transação do DynamoDB atualiza a SAGA e grava o item `OUTBOX` de forma
+   atômica. Se a transação falhar, nenhum dos dois é persistido.
+2. O item nasce com `status=PENDING`, `attempts=0` e a próxima tentativa em
+   `availableAt`.
+3. O índice `outbox-by-status` reúne mensagens pendentes de todas as SAGAs. Ele
+   evita consultar cada partição individualmente.
+4. O publicador reserva a mensagem temporariamente, alterando o estado para
+   `PROCESSING` e preenchendo `lockId` e `lockedUntil`.
+5. Se o envio ao SQS funcionar, o estado passa para `PUBLISHED`. O item
+   continua na tabela para auditoria, mas é removido do índice de pendências.
+6. Se o envio falhar, o estado volta para `PENDING`, `attempts` é incrementado
+   e `availableAt` recebe uma nova data com backoff.
+7. Se um publicador parar enquanto processa uma mensagem, o lease expira e
+   outro ciclo pode reservá-la novamente.
+
+Esse mecanismo resolve o intervalo entre persistir o estado da SAGA e publicar
+no SQS. A entrega é **pelo menos uma vez**: uma mensagem pode ser reenviada se o
+SQS aceitar o envio e a atualização para `PUBLISHED` falhar. Por isso,
+consumidores usam `messageId` e Inbox para garantir idempotência.
+
+### Atributos da Outbox
+
+| Atributo | Descrição |
+|---|---|
+| `messageId` | Identificador único da mensagem e parte da `SK` |
+| `messageType` | Comando publicado, por exemplo `CreatePayment` |
+| `destination` | Nome da fila SQS de destino |
+| `payload` | Envelope JSON completo enviado ao SQS |
+| `status` | `PENDING`, `PROCESSING` ou `PUBLISHED` |
+| `attempts` | Quantidade de falhas anteriores de publicação |
+| `availableAt` | Instante a partir do qual a mensagem pode ser tentada |
+| `lockId`, `lockedUntil` | Lease temporário que impede publicação concorrente |
+| `lastError` | Nome sanitizado do último erro de publicação |
+| `publishedAt` | Instante em que a publicação foi confirmada |
+| `GSI3PK`, `GSI3SK` | Chaves do índice `outbox-by-status`; removidas após sucesso |
+
 ## Atributos do item `SAGA`
 
 | Atributo | Obrigatório | Descrição |
