@@ -119,6 +119,63 @@ O recebimento de `PaymentApproved` não conclui a SAGA. O estado só chega a
 `COMPLETED` depois que o Operation confirma
 `ServiceOrderReadyForExecution`.
 
+### Diagrama de sequência da SAGA
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Operation
+    participant Events as SQS<br/>orchestrator queue
+    participant Orchestrator
+    participant DynamoDB
+    participant Commands as SQS<br/>command queues
+    participant Payment
+
+    Operation->>Events: ServiceOrderBudgetApproved
+    Events->>Orchestrator: ServiceOrderBudgetApproved
+    Orchestrator->>DynamoDB: Cria SAGA e outbox em transação
+    Note over Orchestrator,DynamoDB: PAYMENT_CREATION_PENDING
+    Orchestrator->>Commands: CreatePayment
+    Commands->>Payment: CreatePayment
+    Payment->>Events: PaymentLinkCreated
+    Events->>Orchestrator: PaymentLinkCreated
+    Orchestrator->>DynamoDB: Atualiza SAGA e grava outbox
+    Note over Orchestrator,DynamoDB: AWAITING_PAYMENT
+    Orchestrator->>Commands: MarkServiceOrderAwaitingPayment
+    Commands->>Operation: MarkServiceOrderAwaitingPayment
+    Operation->>Events: ServiceOrderAwaitingPayment
+    Events->>Orchestrator: ServiceOrderAwaitingPayment
+    Orchestrator->>DynamoDB: Registra confirmação do Operation
+
+    alt Pagamento aprovado
+        Payment->>Events: PaymentApproved
+        Events->>Orchestrator: PaymentApproved
+        Orchestrator->>DynamoDB: Atualiza SAGA e grava outbox
+        Note over Orchestrator,DynamoDB: RELEASING_SERVICE_ORDER
+        Orchestrator->>Commands: MarkServiceOrderReadyForExecution
+        Commands->>Operation: MarkServiceOrderReadyForExecution
+        Operation->>Events: ServiceOrderReadyForExecution
+        Events->>Orchestrator: ServiceOrderReadyForExecution
+        Orchestrator->>DynamoDB: Conclui SAGA
+        Note over Orchestrator,DynamoDB: COMPLETED
+    else Pagamento rejeitado
+        Payment->>Events: PaymentRejected
+        Events->>Orchestrator: PaymentRejected
+        Orchestrator->>DynamoDB: Inicia compensação e grava outbox
+        Note over Orchestrator,DynamoDB: COMPENSATING
+        Orchestrator->>Commands: CancelServiceOrder
+        Commands->>Operation: CancelServiceOrder
+        Operation->>Events: ServiceOrderCancelled
+        Events->>Orchestrator: ServiceOrderCancelled
+        Orchestrator->>DynamoDB: Finaliza compensação
+        Note over Orchestrator,DynamoDB: FAILED
+    end
+```
+
+Cada consumo grava `INBOX` e histórico de forma idempotente. Os comandos são
+gravados primeiro na `OUTBOX` da mesma transação da mudança de estado e
+publicados posteriormente nas filas indicadas no diagrama.
+
 ## Compensação homologada
 
 ```text
