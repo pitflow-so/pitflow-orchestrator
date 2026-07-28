@@ -5,6 +5,8 @@ serviço. Ele mantém o estado e o histórico da SAGA no DynamoDB, consome event
 de negócio, publica comandos para Operation e Payment e decide quando o fluxo
 termina em `COMPLETED` ou `FAILED`.
 
+A qualidade do código é acompanhada continuamente pelo SonarQube Cloud.
+
 ## Por que a SAGA é orquestrada
 
 O fluxo atravessa Operation, Payment, Mercado Pago, PostgreSQL, DynamoDB e SQS.
