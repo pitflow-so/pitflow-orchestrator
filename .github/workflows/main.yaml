@@ -31,6 +31,12 @@ jobs:
           cache: maven
       - name: Build and test
         run: mvn -B clean verify
+      - name: Publish JaCoCo coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrator-jacoco-${{ github.sha }}
+          path: target/site/jacoco/
+          retention-days: 14
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -44,19 +50,49 @@ jobs:
           ECR_URL="$(aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text | jq -r '.ECR_URL // empty')"
           test -n "$ECR_URL"
           echo "ecr_url=$ECR_URL" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/amazon-ecr-login@v2
       - id: image
-        name: Build and push image
+        name: Resolve image
         env:
           ECR_URL: ${{ steps.platform.outputs.ecr_url }}
         run: |
           set -euo pipefail
           IMAGE_VERSION="orchestrator-${GITHUB_SHA}"
           CONTAINER_IMAGE="${ECR_URL}:${IMAGE_VERSION}"
-          docker build --tag "$CONTAINER_IMAGE" .
-          docker push "$CONTAINER_IMAGE"
+          ECR_REPOSITORY="${ECR_URL#*/}"
+
+          set +e
+          ECR_LOOKUP="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_VERSION" \
+            2>&1)"
+          ECR_LOOKUP_STATUS=$?
+          set -e
+
+          if [ "$ECR_LOOKUP_STATUS" -eq 0 ]; then
+            IMAGE_EXISTS=true
+            echo "Image $CONTAINER_IMAGE already exists; it will be reused."
+          elif grep -q "ImageNotFoundException" <<< "$ECR_LOOKUP"; then
+            IMAGE_EXISTS=false
+            echo "Image $CONTAINER_IMAGE does not exist; it will be built."
+          else
+            echo "Unable to query image $CONTAINER_IMAGE in ECR." >&2
+            echo "$ECR_LOOKUP" >&2
+            exit "$ECR_LOOKUP_STATUS"
+          fi
+
           echo "container_image=$CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
           echo "image_version=$IMAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "image_exists=$IMAGE_EXISTS" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: steps.image.outputs.image_exists != 'true'
+      - name: Build and push image
+        if: steps.image.outputs.image_exists != 'true'
+        env:
+          CONTAINER_IMAGE: ${{ steps.image.outputs.container_image }}
+        run: |
+          set -euo pipefail
+          docker build --tag "$CONTAINER_IMAGE" .
+          docker push "$CONTAINER_IMAGE"
 
   deploy:
     needs: build
